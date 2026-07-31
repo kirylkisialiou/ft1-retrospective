@@ -2,7 +2,20 @@ name = "ft1-retrospective"
 compatibility_date = "2025-07-01"
 pages_build_output_dir = "dist"
 
+# Top-level binding (used by local / some deploys)
 [[d1_databases]]
+binding = "DB"
+database_name = "ft1-retro"
+database_id = "c177ca8d-96c2-4e08-80a2-dcdf37591a46"
+
+# Pages Git production/preview ONLY pick up env-scoped bindings.
+# Without these, Functions see env.DB === undefined → API 500 → client localStorage.
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "ft1-retro"
+database_id = "c177ca8d-96c2-4e08-80a2-dcdf37591a46"
+
+[[env.preview.d1_databases]]
 binding = "DB"
 database_name = "ft1-retro"
 database_id = "c177ca8d-96c2-4e08-80a2-dcdf37591a46"

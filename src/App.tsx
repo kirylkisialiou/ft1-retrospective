@@ -8,10 +8,9 @@ import {
   type FormEvent,
 } from 'react'
 import './App.css'
-import { CampScene } from './components/CampScene'
-import { SeatRing } from './components/SeatRing'
+import { SeatColumn } from './components/SeatRing'
 import { canDeal, COLUMN_TARGET } from './lib/deal'
-import { api, type StorageMode } from './lib/api'
+import { api, getLastRemoteError, type StorageMode } from './lib/api'
 import {
   getSavedDisplayName,
   saveDisplayName,
@@ -407,14 +406,14 @@ export default function App() {
     return state?.cards.filter((c) => c.category === category) ?? []
   }
 
+  const offline =
+    mode === 'local' || liveHint === 'reconnect…' || liveHint === 'local'
+
   return (
     <div className="app">
+      <div className="bg-camp" aria-hidden="true" />
       <Stars />
-      <div className="horizon" aria-hidden="true">
-        <div className="silhouette" />
-      </div>
       <div className="campfire-glow" aria-hidden="true" />
-      <div className="side-fire-wash" aria-hidden="true" />
 
       <header className="hero">
         <div className="badge">Sprint #{state?.sprint.number ?? '…'}</div>
@@ -448,18 +447,26 @@ export default function App() {
           >
             {linkCopied ? 'Ссылка скопирована' : 'Ссылка на комнату'}
           </button>
-          <span className="mode-pill">
+          <span className={`mode-pill${offline ? ' warn' : ''}`}>
             {mode === 'loading'
               ? '…'
               : mode === 'remote'
                 ? `D1 · ${liveHint || 'live'}`
-                : `local · ${liveHint || 'sync'}`}
+                : 'localStorage · нет sync'}
           </span>
         </div>
         {state ? (
           <p className="room-url">/s/{state.sprint.slug}</p>
         ) : null}
       </header>
+
+      {offline ? (
+        <div className="offline-banner" role="status">
+          Офлайн / localStorage — другие браузеры вас не видят.
+          {getLastRemoteError() ? ` (${getLastRemoteError()})` : ''} Проверьте
+          Pages → Bindings → D1 <code>DB</code> → ft1-retro.
+        </div>
+      ) : null}
 
       {readOnly ? (
         <div className="archive-banner">
@@ -469,8 +476,6 @@ export default function App() {
 
       <div className="layout">
         <aside className="sidebar">
-          <CampScene />
-
           {!readOnly ? (
             <section className="panel">
               <h2>Новая карта</h2>
@@ -582,15 +587,6 @@ export default function App() {
 
         <main className="table-wrap">
           <section className="poker-table">
-            <SeatRing
-              seats={state?.seats ?? []}
-              readOnly={readOnly}
-              busy={busy}
-              defaultName={form.author || getSavedDisplayName()}
-              onClaim={(idx, name) => void onClaimSeat(idx, name)}
-              onLeave={() => void onLeaveSeat()}
-            />
-
             <div className="table-top">
               <div className="crew">
                 <strong>Sprint #{state?.sprint.number ?? '…'}</strong>
@@ -604,7 +600,7 @@ export default function App() {
                     disabled={busy || !dealAvailable}
                     title={
                       dealAvailable
-                        ? 'Доложить темы в тонкие колонки'
+                        ? `Тонких колонок: ${thinColumns}. Доложит до ${COLUMN_TARGET} тем в каждую (колода заменится).`
                         : 'Во всех колонках уже хватает своих карт'
                     }
                   >
@@ -622,60 +618,76 @@ export default function App() {
               </div>
             </div>
 
-            {!readOnly && dealAvailable ? (
-              <div className="low-cards">
-                Тонких колонок: {thinColumns}. «Раздать» доложит до{' '}
-                {COLUMN_TARGET} тем в каждую (старые карты колоды заменятся).
-              </div>
-            ) : null}
+            <div className="table-board">
+              <SeatColumn
+                side="left"
+                seats={state?.seats ?? []}
+                readOnly={readOnly}
+                busy={busy}
+                defaultName={form.author || getSavedDisplayName()}
+                onClaim={(idx, name) => void onClaimSeat(idx, name)}
+                onLeave={() => void onLeaveSeat()}
+              />
 
-            <div className="columns">
-              {CATEGORIES.map((cat) => {
-                const list = cardsFor(cat.id)
-                const suitClass =
-                  cat.id === 'plus' || cat.id === 'thanks' ? 'red' : 'black'
-                return (
-                  <div className="column" key={cat.id}>
-                    <div className="column-head">
-                      <h3>{cat.label}</h3>
-                      <span className={`suit ${suitClass}`}>{cat.suit}</span>
+              <div className="columns">
+                {CATEGORIES.map((cat) => {
+                  const list = cardsFor(cat.id)
+                  const suitClass =
+                    cat.id === 'plus' || cat.id === 'thanks' ? 'red' : 'black'
+                  return (
+                    <div className="column" key={cat.id}>
+                      <div className="column-head">
+                        <h3>{cat.label}</h3>
+                        <span className={`suit ${suitClass}`}>{cat.suit}</span>
+                      </div>
+                      <div className="cards">
+                        {list.length === 0 ? (
+                          <div className="empty-col">Пусто</div>
+                        ) : (
+                          list.map((card) => (
+                            <article
+                              key={card.id}
+                              className={`card${card.source === 'camp' ? ' camp' : ''}`}
+                            >
+                              <div className="card-top">
+                                <span>
+                                  {card.source === 'camp' ? 'Колода' : 'Команда'}
+                                </span>
+                                <span>{cat.suit}</span>
+                              </div>
+                              <h4>{card.title}</h4>
+                              {card.body ? <p>{card.body}</p> : null}
+                              <div className="card-foot">
+                                <span>{card.author}</span>
+                                {!readOnly ? (
+                                  <button
+                                    type="button"
+                                    className="linkish"
+                                    onClick={() => void onDelete(card.id)}
+                                    disabled={busy}
+                                  >
+                                    убрать
+                                  </button>
+                                ) : null}
+                              </div>
+                            </article>
+                          ))
+                        )}
+                      </div>
                     </div>
-                    <div className="cards">
-                      {list.length === 0 ? (
-                        <div className="empty-col">Пусто</div>
-                      ) : (
-                        list.map((card) => (
-                          <article
-                            key={card.id}
-                            className={`card${card.source === 'camp' ? ' camp' : ''}`}
-                          >
-                            <div className="card-top">
-                              <span>
-                                {card.source === 'camp' ? 'Колода' : 'Команда'}
-                              </span>
-                              <span>{cat.suit}</span>
-                            </div>
-                            <h4>{card.title}</h4>
-                            {card.body ? <p>{card.body}</p> : null}
-                            <div className="card-foot">
-                              <span>{card.author}</span>
-                              {!readOnly ? (
-                                <button
-                                  type="button"
-                                  onClick={() => void onDelete(card.id)}
-                                  disabled={busy}
-                                >
-                                  убрать
-                                </button>
-                              ) : null}
-                            </div>
-                          </article>
-                        ))
-                      )}
-                    </div>
-                  </div>
-                )
-              })}
+                  )
+                })}
+              </div>
+
+              <SeatColumn
+                side="right"
+                seats={state?.seats ?? []}
+                readOnly={readOnly}
+                busy={busy}
+                defaultName={form.author || getSavedDisplayName()}
+                onClaim={(idx, name) => void onClaimSeat(idx, name)}
+                onLeave={() => void onLeaveSeat()}
+              />
             </div>
           </section>
         </main>

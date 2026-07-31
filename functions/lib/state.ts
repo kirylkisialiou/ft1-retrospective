@@ -132,6 +132,15 @@ export async function resolveSprint(
   return active
 }
 
+function requireDb(env: Env): D1Database {
+  if (!env.DB) {
+    throw new Error(
+      'D1 binding DB is missing. In Pages → Settings → Bindings add D1 variable name "DB" → ft1-retro (also set [[env.production.d1_databases]] in wrangler.toml).',
+    )
+  }
+  return env.DB
+}
+
 export async function loadState(
   env: Env,
   opts: {
@@ -140,6 +149,7 @@ export async function loadState(
     token?: string | null
   } = {},
 ) {
+  requireDb(env)
   const sprint = await resolveSprint(env, opts)
 
   const { results: cards } = await env.DB.prepare(

@@ -1,40 +1,36 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 import type { Seat } from '../types'
 import { SEAT_COUNT } from '../types'
-
-/** Positions around the oval poker table (percent). */
-const SEAT_POS: { left: string; top: string }[] = [
-  { left: '12%', top: '8%' },
-  { left: '38%', top: '2%' },
-  { left: '62%', top: '2%' },
-  { left: '88%', top: '8%' },
-  { left: '90%', top: '78%' },
-  { left: '62%', top: '88%' },
-  { left: '38%', top: '88%' },
-  { left: '10%', top: '78%' },
-]
 
 interface Props {
   seats: Seat[]
   readOnly: boolean
   busy: boolean
   defaultName: string
+  side: 'left' | 'right'
   onClaim: (seatIndex: number, displayName: string) => void
   onLeave: () => void
 }
 
-export function SeatRing({
+/** Left column = seats 0–3, right = 4–7. */
+export function SeatColumn({
   seats,
   readOnly,
   busy,
   defaultName,
+  side,
   onClaim,
   onLeave,
 }: Props) {
   const [name, setName] = useState(defaultName)
   const [picking, setPicking] = useState<number | null>(null)
-  const mine = seats.find((s) => s.isMine)
-  const taken = seats.filter((s) => s.occupied).length
+  const start = side === 'left' ? 0 : 4
+  const indices = [start, start + 1, start + 2, start + 3]
+
+  useEffect(() => {
+    setName(defaultName)
+  }, [defaultName])
 
   function tryClaim(seatIndex: number) {
     if (readOnly || busy) return
@@ -55,22 +51,64 @@ export function SeatRing({
     setPicking(null)
   }
 
+  const modal =
+    picking !== null && typeof document !== 'undefined'
+      ? createPortal(
+          <div
+            className="seat-modal-overlay"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Сесть за стол"
+          >
+            <div className="seat-modal-card">
+              <h3>Место {picking + 1}</h3>
+              <label>
+                Как тебя звать
+                <input
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="Имя"
+                  maxLength={40}
+                  autoFocus
+                />
+              </label>
+              <div className="seat-modal-actions">
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  onClick={() => setPicking(null)}
+                >
+                  Отмена
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  disabled={!name.trim() || busy}
+                  onClick={confirmClaim}
+                >
+                  Сесть
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body,
+        )
+      : null
+
   return (
-    <div className="seat-ring">
-      {Array.from({ length: SEAT_COUNT }, (_, i) => {
+    <div className={`seat-column seat-column-${side}`}>
+      {indices.map((i) => {
         const seat = seats[i] ?? {
           seatIndex: i,
           displayName: '',
           occupied: false,
           isMine: false,
         }
-        const pos = SEAT_POS[i]
         return (
           <button
             key={i}
             type="button"
             className={`seat${seat.occupied ? ' occupied' : ' free'}${seat.isMine ? ' mine' : ''}`}
-            style={{ left: pos.left, top: pos.top }}
             disabled={readOnly || busy || (seat.occupied && !seat.isMine)}
             onClick={() => tryClaim(i)}
             title={
@@ -81,54 +119,19 @@ export function SeatRing({
                   : 'Сесть здесь'
             }
           >
-            <span className="seat-chip">{i + 1}</span>
+            <span className="seat-chip">Место {i + 1}</span>
             <span className="seat-name">
               {seat.occupied ? seat.displayName : 'Свободно'}
             </span>
           </button>
         )
       })}
-
-      <div className="seat-legend">
-        За столом {taken}/{SEAT_COUNT}
-        {mine ? ` · ты: ${mine.displayName}` : ''}
-        {readOnly ? ' · архив' : ''}
-      </div>
-
-      {picking !== null ? (
-        <div className="seat-modal" role="dialog" aria-label="Сесть за стол">
-          <div className="seat-modal-card">
-            <h3>Место {picking + 1}</h3>
-            <label>
-              Как тебя звать
-              <input
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Имя"
-                maxLength={40}
-                autoFocus
-              />
-            </label>
-            <div className="seat-modal-actions">
-              <button
-                type="button"
-                className="btn btn-ghost"
-                onClick={() => setPicking(null)}
-              >
-                Отмена
-              </button>
-              <button
-                type="button"
-                className="btn btn-primary"
-                disabled={!name.trim() || busy}
-                onClick={confirmClaim}
-              >
-                Сесть
-              </button>
-            </div>
-          </div>
-        </div>
+      {side === 'left' ? (
+        <p className="seat-column-note">
+          {seats.filter((s) => s.occupied).length}/{SEAT_COUNT} за столом
+        </p>
       ) : null}
+      {modal}
     </div>
   )
 }

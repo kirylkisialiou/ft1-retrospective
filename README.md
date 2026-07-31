@@ -23,7 +23,7 @@ http://localhost:5173 — данные в браузере.
 - Открытая комната — можно добавлять карты и садиться за стол.
 - Архив — только просмотр обсуждения (и кто сидел).
 - Кнопка **«Ссылка на комнату»** копирует полный URL.
-- На Cloudflare Pages SPA-fallback: `public/_redirects` (`/* → /index.html`).
+- На Cloudflare Pages SPA-fallback только для комнат: `public/_redirects` (`/s/* → /index.html`). `/api/*` идёт в Functions (`public/_routes.json`).
 
 ## Места за столом
 
@@ -75,14 +75,18 @@ database_id = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
 npx wrangler d1 execute ft1-retro --remote --file=./schema.sql
 ```
 
-4. In Cloudflare Dashboard → your Pages project → **Settings → Bindings**:
-   - Type: **D1 database**
-   - Variable name: **`DB`** (must match the code)
-   - Database: **`ft1-retro`** (same DB as above)
+4. **Critical — D1 must be bound on the Pages project** (otherwise `/api/*` returns 500 `DB.prepare` and the UI falls back to localStorage with no cross-browser sync):
 
-5. Commit/push the real `database_id` (or rely on the dashboard binding alone — both should point at the same DB).
+   Dashboard → **Workers & Pages** → `ft1-retrospective` → **Settings** → **Bindings** → **Add** → **D1 database**:
+   - Variable name: **`DB`**
+   - Database: **`ft1-retro`**
+   - Apply to **Production** and **Preview**
 
-Without a D1 binding the site still loads; the app falls back to `localStorage` per browser.
+   Also keep `[[env.production.d1_databases]]` / `[[env.preview.d1_databases]]` in `wrangler.toml` (Git deploys read env-scoped bindings).
+
+5. Quick check: `curl https://ft1-retrospective.pages.dev/api/state` must return JSON with `cards`/`seats`, not `{"error":"...prepare..."}`.
+
+Without a D1 binding the site still loads; the app falls back to `localStorage` per browser (banner warns).
 
 Папка `functions/` → Pages Functions (`/api/state`, `/api/cards`, `/api/deal`, `/api/sprint`).
 

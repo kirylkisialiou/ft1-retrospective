@@ -2,8 +2,13 @@ import type { Category, RetroState } from '../types'
 import { localApi } from './localStore'
 import { getOccupantToken } from './occupant'
 
-/** Only hard-fail over to localStorage after mutations can't reach the API. */
+/** Sticky local only after API failures; always re-probe so D1 can recover. */
 let preferLocal = false
+let lastRemoteError: string | null = null
+
+export function getLastRemoteError() {
+  return lastRemoteError
+}
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
@@ -41,13 +46,13 @@ async function withFallback<T>(
   remote: () => Promise<T>,
   local: () => Promise<T>,
 ): Promise<{ data: T; mode: 'remote' | 'local' }> {
-  if (preferLocal) {
-    return { data: await local(), mode: 'local' }
-  }
   try {
     const data = await remote()
+    preferLocal = false
+    lastRemoteError = null
     return { data, mode: 'remote' }
-  } catch {
+  } catch (e) {
+    lastRemoteError = e instanceof Error ? e.message : 'API unavailable'
     preferLocal = true
     return { data: await local(), mode: 'local' }
   }
@@ -70,24 +75,26 @@ function stateQuery(ref?: string | null) {
 }
 
 export const api = {
-  /**
-   * Fetch board state.
-   * - soft: poll path — never permanently lock to localStorage; throw on remote error
-   *   so the UI keeps the last good remote snapshot.
-   */
   async getState(ref?: string | null, opts?: { soft?: boolean }) {
     const t = token()
     const params = stateQuery(ref)
 
     if (opts?.soft) {
-      if (preferLocal) {
-        return {
-          data: await localApi.getState(ref, t),
-          mode: 'local' as const,
+      try {
+        const data = await request<RetroState>(`/api/state?${params}`)
+        preferLocal = false
+        lastRemoteError = null
+        return { data, mode: 'remote' as const }
+      } catch (e) {
+        lastRemoteError = e instanceof Error ? e.message : 'API unavailable'
+        if (preferLocal) {
+          return {
+            data: await localApi.getState(ref, t),
+            mode: 'local' as const,
+          }
         }
+        throw e
       }
-      const data = await request<RetroState>(`/api/state?${params}`)
-      return { data, mode: 'remote' as const }
     }
 
     return withFallback(
@@ -96,9 +103,9 @@ export const api = {
     )
   },
 
-  /** After a successful remote mutation, allow polls to use the API again. */
   markRemoteOk() {
     preferLocal = false
+    lastRemoteError = null
   },
 
   async addCard(input: {
@@ -107,7 +114,7 @@ export const api = {
     body: string
     author: string
   }) {
-    const result = await withFallback(
+    return withFallback(
       () =>
         request<RetroState>('/api/cards', {
           method: 'POST',
@@ -115,25 +122,21 @@ export const api = {
         }),
       () => localApi.addCard(input),
     )
-    if (result.mode === 'remote') preferLocal = false
-    return result
   },
 
   async deleteCard(id: string) {
-    const result = await withFallback(
+    return withFallback(
       () =>
         request<RetroState>(`/api/cards?id=${encodeURIComponent(id)}`, {
           method: 'DELETE',
         }),
       () => localApi.deleteCard(id),
     )
-    if (result.mode === 'remote') preferLocal = false
-    return result
   },
 
   async updateSprint(patch: { number?: number }) {
     const t = token()
-    const result = await withFallback(
+    return withFallback(
       () =>
         request<RetroState>('/api/sprint', {
           method: 'PATCH',
@@ -141,13 +144,11 @@ export const api = {
         }),
       () => localApi.updateSprint(patch),
     )
-    if (result.mode === 'remote') preferLocal = false
-    return result
   },
 
   async closeSprint() {
     const t = token()
-    const result = await withFallback(
+    return withFallback(
       () =>
         request<RetroState>(
           `/api/sprint?action=close&token=${encodeURIComponent(t)}`,
@@ -155,17 +156,13 @@ export const api = {
         ),
       () => localApi.closeSprint(t),
     )
-    if (result.mode === 'remote') preferLocal = false
-    return result
   },
 
   async dealFromCampfire() {
-    const result = await withFallback(
+    return withFallback(
       () => request<RetroState>('/api/deal', { method: 'POST' }),
       () => localApi.dealFromCampfire(),
     )
-    if (result.mode === 'remote') preferLocal = false
-    return result
   },
 
   async claimSeat(input: {
@@ -174,7 +171,7 @@ export const api = {
     ref?: string | null
   }) {
     const t = token()
-    const result = await withFallback(
+    return withFallback(
       () =>
         request<RetroState>('/api/seats', {
           method: 'POST',
@@ -194,8 +191,6 @@ export const api = {
           ref: input.ref,
         }),
     )
-    if (result.mode === 'remote') preferLocal = false
-    return result
   },
 
   async leaveSeat(ref?: string | null) {
@@ -205,14 +200,12 @@ export const api = {
       params.set('slug', ref)
       params.set('sprintId', ref)
     }
-    const result = await withFallback(
+    return withFallback(
       () =>
         request<RetroState>(`/api/seats?${params}`, {
           method: 'DELETE',
         }),
       () => localApi.leaveSeat({ token: t, ref }),
     )
-    if (result.mode === 'remote') preferLocal = false
-    return result
   },
 }

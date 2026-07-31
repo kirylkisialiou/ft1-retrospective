@@ -1,3 +1,2 @@
-# SPA fallback so /s/:slug refreshes work on Cloudflare Pages
-/api/*  /api/:splat  200
-/*      /index.html  200
+# SPA fallback ONLY for room routes — never rewrite /api/* (that breaks Functions → D1).
+/s/*  /index.html  200
