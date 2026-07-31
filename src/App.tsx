@@ -72,7 +72,9 @@ function Stars() {
           }
         />
       ))}
-      <div className="moon" />
+      <div className="moon" aria-hidden="true">
+        <img className="moon-img" src="/moon-v3.png" alt="" />
+      </div>
     </div>
   )
 }
@@ -758,19 +760,19 @@ export default function App() {
                 onLeave={() => void onLeaveSeat()}
               />
             </div>
+
+            <footer className="retro-rules">
+              <h2>Правила у костра</h2>
+              <ul>
+                <li>Безопасное место — можно говорить прямо.</li>
+                <li>Без обвинений: смотрим на процесс, не на людей.</li>
+                <li>Один говорит — остальные слушают.</li>
+                <li>Выходим с действиями, а не только с дымом.</li>
+              </ul>
+            </footer>
           </section>
         </main>
       </div>
-
-      <footer className="retro-rules">
-        <h2>Правила у костра</h2>
-        <ul>
-          <li>Безопасное место — можно говорить прямо.</li>
-          <li>Без обвинений: смотрим на процесс, не на людей.</li>
-          <li>Один говорит — остальные слушают.</li>
-          <li>Выходим с действиями, а не только с дымом.</li>
-        </ul>
-      </footer>
 
       {error ? <p className="status error">{error}</p> : null}
       {!state && !error ? <p className="status">Загрузка…</p> : null}
