@@ -6,7 +6,24 @@ import {
   loadState,
   resolveSprint,
   SEAT_COUNT,
+  SprintNotFoundError,
 } from '../lib/state'
+
+function catchSeat(e: unknown): Response {
+  if (e instanceof SprintNotFoundError) {
+    return json(
+      {
+        error: e.message,
+        code: e.code,
+        requested: e.requested,
+        activeSlug: e.activeSlug,
+        sprints: e.sprints,
+      },
+      404,
+    )
+  }
+  return error(e instanceof Error ? e.message : 'Seat error', 500)
+}
 
 export const onRequestPost: PagesFunction<Env> = async (context) => {
   try {
@@ -78,7 +95,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       }),
     )
   } catch (e) {
-    return error(e instanceof Error ? e.message : 'Failed to claim seat', 500)
+    return catchSeat(e)
   }
 }
 
@@ -112,6 +129,6 @@ export const onRequestDelete: PagesFunction<Env> = async (context) => {
       }),
     )
   } catch (e) {
-    return error(e instanceof Error ? e.message : 'Failed to leave seat', 500)
+    return catchSeat(e)
   }
 }

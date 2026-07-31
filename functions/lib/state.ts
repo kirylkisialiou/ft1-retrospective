@@ -103,30 +103,68 @@ async function loadSeats(env: Env, sprintId: string, token?: string | null) {
   })
 }
 
+export class SprintNotFoundError extends Error {
+  readonly code = 'SPRINT_NOT_FOUND' as const
+
+  constructor(
+    public requested: string,
+    public activeSlug: string,
+    public sprints: Array<{
+      slug: string
+      number: number
+      status: 'active' | 'archived'
+    }>,
+  ) {
+    super(`Спринт «${requested}» не найден`)
+    this.name = 'SprintNotFoundError'
+  }
+}
+
+async function notFound(
+  env: Env,
+  requested: string,
+  active: DbSprint,
+): Promise<never> {
+  const history = await loadHistory(env)
+  throw new SprintNotFoundError(
+    requested,
+    active.slug,
+    history.map((s) => ({
+      slug: s.slug,
+      number: s.number,
+      status: s.status,
+    })),
+  )
+}
+
 export async function resolveSprint(
   env: Env,
   opts: { sprintId?: string | null; slug?: string | null },
 ): Promise<DbSprint> {
   const active = await ensureActiveSprint(env)
+  const requestedSlug = opts.slug?.trim() || null
+  const requestedId = opts.sprintId?.trim() || null
 
-  if (opts.slug) {
+  if (requestedSlug) {
     const bySlug = await env.DB.prepare(
       `SELECT id, number, slug, title, status, created_at, archived_at
        FROM sprints WHERE slug = ?`,
     )
-      .bind(opts.slug)
+      .bind(requestedSlug)
       .first<DbSprint>()
     if (bySlug) return bySlug
+    await notFound(env, requestedSlug, active)
   }
 
-  if (opts.sprintId) {
+  if (requestedId) {
     const byId = await env.DB.prepare(
       `SELECT id, number, slug, title, status, created_at, archived_at
        FROM sprints WHERE id = ?`,
     )
-      .bind(opts.sprintId)
+      .bind(requestedId)
       .first<DbSprint>()
     if (byId) return byId
+    await notFound(env, requestedId, active)
   }
 
   return active

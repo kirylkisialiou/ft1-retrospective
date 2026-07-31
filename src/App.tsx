@@ -10,7 +10,14 @@ import {
 import './App.css'
 import { SeatColumn } from './components/SeatRing'
 import { canDeal, COLUMN_TARGET } from './lib/deal'
-import { api, getLastRemoteError, type StorageMode } from './lib/api'
+import {
+  api,
+  getLastRemoteError,
+  isSprintNotFound,
+  sprintNotFoundPayload,
+  type SprintNotFoundPayload,
+  type StorageMode,
+} from './lib/api'
 import {
   getSavedDisplayName,
   saveDisplayName,
@@ -100,6 +107,9 @@ export default function App() {
   const [linkCopied, setLinkCopied] = useState(false)
   const [liveHint, setLiveHint] = useState('')
   const [roomRef, setRoomRef] = useState<string | null>(() => parseRoomSlug())
+  const [missingRoom, setMissingRoom] = useState<SprintNotFoundPayload | null>(
+    null,
+  )
   const [form, setForm] = useState({
     category: 'plus' as Category,
     title: '',
@@ -141,9 +151,20 @@ export default function App() {
 
   const load = useCallback(
     async (ref?: string | null, syncUrl = true) => {
-      const result = await api.getState(ref)
-      applyBoard(result, { syncUrl, force: true })
-      return result
+      try {
+        const result = await api.getState(ref)
+        setMissingRoom(null)
+        applyBoard(result, { syncUrl, force: true })
+        return result
+      } catch (e) {
+        if (!isSprintNotFound(e)) throw e
+        const payload = sprintNotFoundPayload(e)
+        if (payload) setMissingRoom(payload)
+        // Show active board under the warning; keep the typed URL as-is.
+        const active = await api.getState(null)
+        applyBoard(active, { syncUrl: false, force: true })
+        return active
+      }
     },
     [applyBoard],
   )
@@ -156,7 +177,11 @@ export default function App() {
       setLiveHint(result.mode === 'remote' ? 'live' : 'local')
       setError(null)
       return true
-    } catch {
+    } catch (e) {
+      if (isSprintNotFound(e)) {
+        // Polling uses loaded room slug; ignore stale URL mismatches.
+        return true
+      }
       setLiveHint('reconnect…')
       return false
     }
@@ -311,7 +336,9 @@ export default function App() {
   async function onSprintNumber(value: number) {
     if (readOnly || !Number.isFinite(value) || value < 1) return
     try {
+      // Number label only — room slug/URL stays stable (share links don't break).
       await applyState(await api.updateSprint({ number: value }))
+      setMissingRoom(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Не удалось сменить номер')
     }
@@ -341,7 +368,9 @@ export default function App() {
     setError(null)
     try {
       if (slugOrId) navigateRoom(slugOrId)
+      else if (missingRoom?.activeSlug) navigateRoom(missingRoom.activeSlug)
       await load(slugOrId)
+      setMissingRoom(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Не удалось открыть спринт')
     } finally {
@@ -456,9 +485,49 @@ export default function App() {
           </span>
         </div>
         {state ? (
-          <p className="room-url">/s/{state.sprint.slug}</p>
+          <p className="room-url">
+            Комната: /s/{state.sprint.slug}
+            {!readOnly ? (
+              <span className="room-url-hint">
+                {' '}
+                · номер в поле выше — ярлык; ссылка меняется только при «Закрыть
+                спринт»
+              </span>
+            ) : null}
+          </p>
         ) : null}
       </header>
+
+      {missingRoom ? (
+        <div className="missing-banner" role="alert">
+          <p>
+            Комната <code>/s/{missingRoom.requested}</code> не найдена.
+            Менять URL вручную на <code>/s/s-25</code> не создаёт спринт — он
+            появляется после «Закрыть спринт» (или если такой slug уже есть в
+            истории).
+          </p>
+          <p className="missing-list">
+            Есть в базе:{' '}
+            {missingRoom.sprints.length
+              ? missingRoom.sprints
+                  .map(
+                    (s) =>
+                      `/s/${s.slug} (#${s.number}${s.status === 'active' ? ', текущий' : ''})`,
+                  )
+                  .join(' · ')
+              : 'пока только текущий спринт'}
+          </p>
+          <div className="missing-actions">
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => void onOpenSprint(missingRoom.activeSlug)}
+            >
+              Открыть текущий /s/{missingRoom.activeSlug}
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       {offline ? (
         <div className="offline-banner" role="status">

@@ -1,4 +1,4 @@
-import type { Category, RetroState } from '../types'
+import type { Category, RetroState, SprintSummary } from '../types'
 import { localApi } from './localStore'
 import { getOccupantToken } from './occupant'
 
@@ -8,6 +8,66 @@ let lastRemoteError: string | null = null
 
 export function getLastRemoteError() {
   return lastRemoteError
+}
+
+export type SprintNotFoundPayload = {
+  code: 'SPRINT_NOT_FOUND'
+  error: string
+  requested: string
+  activeSlug: string
+  sprints: Array<Pick<SprintSummary, 'slug' | 'number' | 'status'>>
+}
+
+export class ApiError extends Error {
+  status: number
+  body: unknown
+
+  constructor(message: string, status: number, body: unknown) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+    this.body = body
+  }
+}
+
+function asNotFoundPayload(value: unknown): SprintNotFoundPayload | null {
+  if (!value || typeof value !== 'object') return null
+  const body = value as Record<string, unknown>
+  if (body.code !== 'SPRINT_NOT_FOUND') return null
+  if (typeof body.requested !== 'string' || typeof body.activeSlug !== 'string') {
+    return null
+  }
+  return body as SprintNotFoundPayload
+}
+
+export function isSprintNotFound(err: unknown): err is ApiError & {
+  body: SprintNotFoundPayload
+} {
+  if (err instanceof ApiError) {
+    const payload = asNotFoundPayload(err.body)
+    return Boolean(payload)
+  }
+  if (
+    err &&
+    typeof err === 'object' &&
+    'sprintNotFound' in err &&
+    asNotFoundPayload((err as { sprintNotFound: unknown }).sprintNotFound)
+  ) {
+    return true
+  }
+  return false
+}
+
+export function sprintNotFoundPayload(
+  err: unknown,
+): SprintNotFoundPayload | null {
+  if (err instanceof ApiError) return asNotFoundPayload(err.body)
+  if (err && typeof err === 'object' && 'sprintNotFound' in err) {
+    return asNotFoundPayload(
+      (err as { sprintNotFound: unknown }).sprintNotFound,
+    )
+  }
+  return null
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -36,7 +96,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       typeof (payload as { error: unknown }).error === 'string'
         ? (payload as { error: string }).error
         : text || `HTTP ${res.status}`
-    throw new Error(message)
+    throw new ApiError(message, res.status, payload)
   }
 
   return payload as T
@@ -52,6 +112,7 @@ async function withFallback<T>(
     lastRemoteError = null
     return { data, mode: 'remote' }
   } catch (e) {
+    if (isSprintNotFound(e)) throw e
     lastRemoteError = e instanceof Error ? e.message : 'API unavailable'
     preferLocal = true
     return { data: await local(), mode: 'local' }
@@ -86,6 +147,7 @@ export const api = {
         lastRemoteError = null
         return { data, mode: 'remote' as const }
       } catch (e) {
+        if (isSprintNotFound(e)) throw e
         lastRemoteError = e instanceof Error ? e.message : 'API unavailable'
         if (preferLocal) {
           return {
@@ -97,10 +159,18 @@ export const api = {
       }
     }
 
-    return withFallback(
-      () => request<RetroState>(`/api/state?${params}`),
-      () => localApi.getState(ref, t),
-    )
+    try {
+      return await withFallback(
+        () => request<RetroState>(`/api/state?${params}`),
+        () => localApi.getState(ref, t),
+      )
+    } catch (e) {
+      const payload = sprintNotFoundPayload(e)
+      if (payload) {
+        throw new ApiError(payload.error, 404, payload)
+      }
+      throw e
+    }
   },
 
   markRemoteOk() {

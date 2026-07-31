@@ -137,9 +137,34 @@ function toState(
   store: Store,
   ref?: string | null,
   token?: string | null,
+  opts?: { strictRef?: boolean },
 ): RetroState {
   const active = activeSprint(store)
-  const sprint = findSprint(store, ref) ?? active
+  const found = ref ? findSprint(store, ref) : null
+  if (opts?.strictRef && ref && !found) {
+    const err = new Error(`Спринт «${ref}» не найден`) as Error & {
+      sprintNotFound: {
+        code: 'SPRINT_NOT_FOUND'
+        error: string
+        requested: string
+        activeSlug: string
+        sprints: Array<{ slug: string; number: number; status: 'active' | 'archived' }>
+      }
+    }
+    err.sprintNotFound = {
+      code: 'SPRINT_NOT_FOUND',
+      error: err.message,
+      requested: ref,
+      activeSlug: active.slug,
+      sprints: history(store).map((s) => ({
+        slug: s.slug,
+        number: s.number,
+        status: s.status,
+      })),
+    }
+    throw err
+  }
+  const sprint = found ?? active
   const cards = store.cards[sprint.id] ?? []
   const seats = mapSeats(store, sprint.id, token)
   const lastDeal = store.deals[sprint.id] ?? null
@@ -168,7 +193,11 @@ export const localApi = {
     token?: string | null,
   ): Promise<RetroState> {
     const store = readStore()
-    if (ref !== undefined) store.viewingRef = ref
+    if (ref) {
+      // Strict: missing room must not silently open the active sprint.
+      return toState(store, ref, token, { strictRef: true })
+    }
+    if (ref === null) store.viewingRef = null
     writeStore(store)
     return toState(store, store.viewingRef, token)
   },
