@@ -19,6 +19,7 @@ export interface DbCard {
 export interface DbSprint {
   id: string
   number: number
+  slug: string
   title: string
   status: string
   created_at: string
@@ -34,9 +35,17 @@ export interface DbDeal {
 export interface DbSprintCount {
   id: string
   number: number
+  slug: string
   title: string
   status: string
   created_at: string
   archived_at: string | null
   card_count: number
+}
+
+export interface DbSeat {
+  seat_index: number
+  occupant_token: string
+  display_name: string
+  claimed_at: string
 }

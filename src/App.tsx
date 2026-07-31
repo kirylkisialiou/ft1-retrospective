@@ -7,8 +7,19 @@ import {
 } from 'react'
 import './App.css'
 import { CampScene } from './components/CampScene'
+import { SeatRing } from './components/SeatRing'
 import { canDeal, COLUMN_TARGET } from './lib/deal'
 import { api, type StorageMode } from './lib/api'
+import {
+  getSavedDisplayName,
+  saveDisplayName,
+} from './lib/occupant'
+import {
+  navigateRoom,
+  parseRoomSlug,
+  roomShareUrl,
+  syncRoomUrl,
+} from './lib/route'
 import {
   APP_NAME,
   CATEGORIES,
@@ -55,6 +66,7 @@ function Stars() {
 function formatDealCopy(state: RetroState): string {
   const lines = [
     `${APP_NAME} · Sprint #${state.sprint.number}`,
+    roomShareUrl(state.sprint.slug),
     '',
     ...CATEGORIES.flatMap((cat) => {
       const cards = state.cards.filter((c) => c.category === cat.id)
@@ -78,26 +90,32 @@ export default function App() {
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [copied, setCopied] = useState(false)
-  const [viewingId, setViewingId] = useState<string | null>(null)
+  const [linkCopied, setLinkCopied] = useState(false)
+  const [roomRef, setRoomRef] = useState<string | null>(() => parseRoomSlug())
   const [form, setForm] = useState({
     category: 'plus' as Category,
     title: '',
     body: '',
-    author: '',
+    author: getSavedDisplayName(),
   })
 
-  async function load(sprintId?: string | null) {
-    const result = await api.getState(sprintId)
+  async function load(ref?: string | null, syncUrl = true) {
+    const result = await api.getState(ref)
     setState(result.data)
     setMode(result.mode)
-    setViewingId(result.data.readOnly ? result.data.sprint.id : null)
+    setRoomRef(result.data.sprint.slug)
+    if (syncUrl) syncRoomUrl(result.data.sprint.slug)
+    const mine = result.data.seats.find((s) => s.isMine)
+    if (mine) {
+      setForm((f) => ({ ...f, author: mine.displayName }))
+    }
   }
 
   useEffect(() => {
     let cancelled = false
     ;(async () => {
       try {
-        await load(null)
+        await load(parseRoomSlug())
       } catch (e) {
         if (!cancelled) {
           setError(e instanceof Error ? e.message : 'Не удалось загрузить')
@@ -105,20 +123,29 @@ export default function App() {
         }
       }
     })()
+
+    function onPop() {
+      void load(parseRoomSlug()).catch((err: unknown) => {
+        setError(err instanceof Error ? err.message : 'Не удалось открыть комнату')
+      })
+    }
+    window.addEventListener('popstate', onPop)
     return () => {
       cancelled = true
+      window.removeEventListener('popstate', onPop)
     }
   }, [])
 
   useEffect(() => {
-    if (mode !== 'remote' || viewingId) return
+    if (mode !== 'remote' || !roomRef) return
     const id = window.setInterval(() => {
-      void load(null).catch(() => undefined)
+      void load(roomRef, false).catch(() => undefined)
     }, 8000)
     return () => window.clearInterval(id)
-  }, [mode, viewingId])
+  }, [mode, roomRef])
 
   const readOnly = state?.readOnly ?? false
+  const mySeat = state?.seats.find((s) => s.isMine)
   const dealAvailable = !readOnly && canDeal(state?.cards ?? [])
   const thinColumns = CATEGORIES.filter((cat) => {
     const human = (state?.cards ?? []).filter(
@@ -128,17 +155,23 @@ export default function App() {
   }).length
   const archived = state?.history.filter((s) => s.status === 'archived') ?? []
 
+  async function applyState(result: { data: RetroState; mode: 'remote' | 'local' }) {
+    setState(result.data)
+    setMode(result.mode)
+    setRoomRef(result.data.sprint.slug)
+    syncRoomUrl(result.data.sprint.slug)
+  }
+
   async function onAdd(e: FormEvent) {
     e.preventDefault()
     if (!form.title.trim() || readOnly) return
+    const author = (mySeat?.displayName || form.author).trim() || 'Странник'
     setBusy(true)
     setError(null)
     try {
-      const result = await api.addCard(form)
-      setState(result.data)
-      setMode(result.mode)
-      setViewingId(null)
-      setForm((f) => ({ ...f, title: '', body: '' }))
+      const result = await api.addCard({ ...form, author })
+      await applyState(result)
+      setForm((f) => ({ ...f, title: '', body: '', author }))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Не удалось добавить карту')
     } finally {
@@ -151,10 +184,7 @@ export default function App() {
     setBusy(true)
     setError(null)
     try {
-      const result = await api.dealFromCampfire()
-      setState(result.data)
-      setMode(result.mode)
-      setViewingId(null)
+      await applyState(await api.dealFromCampfire())
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Колода недоступна')
     } finally {
@@ -166,9 +196,7 @@ export default function App() {
     if (readOnly) return
     setBusy(true)
     try {
-      const result = await api.deleteCard(id)
-      setState(result.data)
-      setMode(result.mode)
+      await applyState(await api.deleteCard(id))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Не удалось удалить')
     } finally {
@@ -179,9 +207,7 @@ export default function App() {
   async function onSprintNumber(value: number) {
     if (readOnly || !Number.isFinite(value) || value < 1) return
     try {
-      const result = await api.updateSprint({ number: value })
-      setState(result.data)
-      setMode(result.mode)
+      await applyState(await api.updateSprint({ number: value }))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Не удалось сменить номер')
     }
@@ -190,16 +216,15 @@ export default function App() {
   async function onCloseSprint() {
     if (readOnly) return
     const ok = window.confirm(
-      `Закрыть Sprint #${state?.sprint.number} и открыть следующий?\nКарты текущего спринта останутся в истории.`,
+      `Закрыть Sprint #${state?.sprint.number} и открыть следующий?\nСсылка на архив останется: /s/${state?.sprint.slug}`,
     )
     if (!ok) return
     setBusy(true)
     setError(null)
     try {
       const result = await api.closeSprint()
-      setState(result.data)
-      setMode(result.mode)
-      setViewingId(null)
+      await applyState(result)
+      navigateRoom(result.data.sprint.slug)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Не удалось закрыть спринт')
     } finally {
@@ -207,13 +232,45 @@ export default function App() {
     }
   }
 
-  async function onOpenSprint(id: string | null) {
+  async function onOpenSprint(slugOrId: string | null) {
     setBusy(true)
     setError(null)
     try {
-      await load(id)
+      if (slugOrId) navigateRoom(slugOrId)
+      await load(slugOrId)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Не удалось открыть спринт')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function onClaimSeat(seatIndex: number, displayName: string) {
+    setBusy(true)
+    setError(null)
+    try {
+      saveDisplayName(displayName)
+      const result = await api.claimSeat({
+        seatIndex,
+        displayName,
+        ref: roomRef,
+      })
+      await applyState(result)
+      setForm((f) => ({ ...f, author: displayName }))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось сесть')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function onLeaveSeat() {
+    setBusy(true)
+    setError(null)
+    try {
+      await applyState(await api.leaveSeat(roomRef))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось встать')
     } finally {
       setBusy(false)
     }
@@ -227,6 +284,17 @@ export default function App() {
       window.setTimeout(() => setCopied(false), 2000)
     } catch {
       setError('Не удалось скопировать')
+    }
+  }
+
+  async function onCopyLink() {
+    if (!state) return
+    try {
+      await navigator.clipboard.writeText(roomShareUrl(state.sprint.slug))
+      setLinkCopied(true)
+      window.setTimeout(() => setLinkCopied(false), 2000)
+    } catch {
+      setError('Не удалось скопировать ссылку')
     }
   }
 
@@ -267,6 +335,14 @@ export default function App() {
               К текущему спринту
             </button>
           )}
+          <button
+            type="button"
+            className="btn btn-ghost"
+            onClick={() => void onCopyLink()}
+            disabled={!state}
+          >
+            {linkCopied ? 'Ссылка скопирована' : 'Ссылка на комнату'}
+          </button>
           <span className="mode-pill">
             {mode === 'loading'
               ? '…'
@@ -275,6 +351,9 @@ export default function App() {
                 : 'localStorage'}
           </span>
         </div>
+        {state ? (
+          <p className="room-url">/s/{state.sprint.slug}</p>
+        ) : null}
       </header>
 
       {readOnly ? (
@@ -335,12 +414,13 @@ export default function App() {
                 <label>
                   Автор
                   <input
-                    value={form.author}
+                    value={mySeat?.displayName || form.author}
                     onChange={(e) =>
                       setForm((f) => ({ ...f, author: e.target.value }))
                     }
                     placeholder="Имя"
                     maxLength={40}
+                    disabled={Boolean(mySeat)}
                   />
                 </label>
                 <button className="btn btn-primary" type="submit" disabled={busy}>
@@ -364,9 +444,7 @@ export default function App() {
             ) : null}
             <ul className="history-list">
               {(state?.history ?? []).map((item) => {
-                const activeView =
-                  item.id === state?.sprint.id ||
-                  (item.status === 'active' && !readOnly && !viewingId)
+                const activeView = item.slug === state?.sprint.slug
                 return (
                   <li key={item.id}>
                     <button
@@ -374,7 +452,9 @@ export default function App() {
                       className={`history-item${activeView ? ' current' : ''}`}
                       onClick={() =>
                         void onOpenSprint(
-                          item.status === 'active' ? null : item.id,
+                          item.status === 'active' && !readOnly
+                            ? item.slug
+                            : item.slug,
                         )
                       }
                       disabled={busy}
@@ -397,6 +477,15 @@ export default function App() {
 
         <main className="table-wrap">
           <section className="poker-table">
+            <SeatRing
+              seats={state?.seats ?? []}
+              readOnly={readOnly}
+              busy={busy}
+              defaultName={form.author || getSavedDisplayName()}
+              onClaim={(idx, name) => void onClaimSeat(idx, name)}
+              onLeave={() => void onLeaveSeat()}
+            />
+
             <div className="table-top">
               <div className="crew">
                 <strong>Sprint #{state?.sprint.number ?? '…'}</strong>
@@ -410,7 +499,7 @@ export default function App() {
                     disabled={busy || !dealAvailable}
                     title={
                       dealAvailable
-                        ? 'Доложить темы в тонкие колонки (свои карты остаются)'
+                        ? 'Доложить темы в тонкие колонки'
                         : 'Во всех колонках уже хватает своих карт'
                     }
                   >

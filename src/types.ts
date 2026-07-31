@@ -4,6 +4,8 @@ export type CardSource = 'human' | 'camp'
 
 export type SprintStatus = 'active' | 'archived'
 
+export const SEAT_COUNT = 8
+
 export interface RetroCard {
   id: string
   category: Category
@@ -17,6 +19,7 @@ export interface RetroCard {
 export interface SprintMeta {
   id: string
   number: number
+  slug: string
   title: string
   status: SprintStatus
   createdAt: string
@@ -26,11 +29,20 @@ export interface SprintMeta {
 export interface SprintSummary {
   id: string
   number: number
+  slug: string
   title: string
   status: SprintStatus
   createdAt: string
   archivedAt: string | null
   cardCount: number
+}
+
+export interface Seat {
+  seatIndex: number
+  displayName: string
+  occupied: boolean
+  /** True if this browser owns the seat (matched by occupant token). */
+  isMine: boolean
 }
 
 export interface LastDeal {
@@ -44,6 +56,7 @@ export interface RetroState {
   cards: RetroCard[]
   lastDeal: LastDeal | null
   history: SprintSummary[]
+  seats: Seat[]
   readOnly: boolean
 }
 
@@ -65,4 +78,12 @@ export const CATEGORY_LABEL: Record<Category, string> = {
   minus: 'минус',
   thanks: 'спасибо',
   improve: 'улучшить',
+}
+
+export function sprintSlug(number: number): string {
+  return `s-${number}`
+}
+
+export function roomPath(slug: string): string {
+  return `/s/${encodeURIComponent(slug)}`
 }

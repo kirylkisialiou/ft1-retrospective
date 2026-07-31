@@ -1,6 +1,7 @@
-import type { DbCard, DbDeal, DbSprint, DbSprintCount, Env } from '../types'
+import type { DbCard, DbDeal, DbSeat, DbSprint, DbSprintCount, Env } from '../types'
 
 const APP_TITLE = 'FT1 - Retrospective'
+const SEAT_COUNT = 8
 
 function mapCard(row: DbCard) {
   return {
@@ -18,6 +19,7 @@ function mapSprint(row: DbSprint) {
   return {
     id: row.id,
     number: row.number,
+    slug: row.slug,
     title: row.title,
     status: row.status as 'active' | 'archived',
     createdAt: row.created_at,
@@ -25,24 +27,30 @@ function mapSprint(row: DbSprint) {
   }
 }
 
+function slugFor(number: number) {
+  return `s-${number}`
+}
+
 async function ensureActiveSprint(env: Env): Promise<DbSprint> {
   const active = await env.DB.prepare(
-    `SELECT id, number, title, status, created_at, archived_at
+    `SELECT id, number, slug, title, status, created_at, archived_at
      FROM sprints WHERE status = 'active' LIMIT 1`,
   ).first<DbSprint>()
 
   if (active) return active
 
   const id = crypto.randomUUID()
+  const slug = slugFor(1)
   await env.DB.prepare(
-    `INSERT INTO sprints (id, number, title, status) VALUES (?, 1, ?, 'active')`,
+    `INSERT INTO sprints (id, number, slug, title, status) VALUES (?, 1, ?, ?, 'active')`,
   )
-    .bind(id, APP_TITLE)
+    .bind(id, slug, APP_TITLE)
     .run()
 
   return {
     id,
     number: 1,
+    slug,
     title: APP_TITLE,
     status: 'active',
     created_at: new Date().toISOString(),
@@ -52,7 +60,7 @@ async function ensureActiveSprint(env: Env): Promise<DbSprint> {
 
 async function loadHistory(env: Env) {
   const { results } = await env.DB.prepare(
-    `SELECT s.id, s.number, s.title, s.status, s.created_at, s.archived_at,
+    `SELECT s.id, s.number, s.slug, s.title, s.status, s.created_at, s.archived_at,
             COUNT(c.id) AS card_count
      FROM sprints s
      LEFT JOIN cards c ON c.sprint_id = s.id
@@ -63,6 +71,7 @@ async function loadHistory(env: Env) {
   return (results ?? []).map((row) => ({
     id: row.id,
     number: row.number,
+    slug: row.slug,
     title: row.title,
     status: row.status as 'active' | 'archived',
     createdAt: row.created_at,
@@ -71,19 +80,67 @@ async function loadHistory(env: Env) {
   }))
 }
 
-export async function loadState(env: Env, sprintId?: string | null) {
+async function loadSeats(env: Env, sprintId: string, token?: string | null) {
+  const { results } = await env.DB.prepare(
+    `SELECT seat_index, occupant_token, display_name, claimed_at
+     FROM seats WHERE sprint_id = ? ORDER BY seat_index ASC`,
+  )
+    .bind(sprintId)
+    .all<DbSeat>()
+
+  const byIndex = new Map(
+    (results ?? []).map((row) => [row.seat_index, row] as const),
+  )
+
+  return Array.from({ length: SEAT_COUNT }, (_, seatIndex) => {
+    const row = byIndex.get(seatIndex)
+    return {
+      seatIndex,
+      displayName: row?.display_name ?? '',
+      occupied: Boolean(row),
+      isMine: Boolean(row && token && row.occupant_token === token),
+    }
+  })
+}
+
+export async function resolveSprint(
+  env: Env,
+  opts: { sprintId?: string | null; slug?: string | null },
+): Promise<DbSprint> {
   const active = await ensureActiveSprint(env)
 
-  let sprint = active
-  if (sprintId) {
-    const requested = await env.DB.prepare(
-      `SELECT id, number, title, status, created_at, archived_at
+  if (opts.slug) {
+    const bySlug = await env.DB.prepare(
+      `SELECT id, number, slug, title, status, created_at, archived_at
+       FROM sprints WHERE slug = ?`,
+    )
+      .bind(opts.slug)
+      .first<DbSprint>()
+    if (bySlug) return bySlug
+  }
+
+  if (opts.sprintId) {
+    const byId = await env.DB.prepare(
+      `SELECT id, number, slug, title, status, created_at, archived_at
        FROM sprints WHERE id = ?`,
     )
-      .bind(sprintId)
+      .bind(opts.sprintId)
       .first<DbSprint>()
-    if (requested) sprint = requested
+    if (byId) return byId
   }
+
+  return active
+}
+
+export async function loadState(
+  env: Env,
+  opts: {
+    sprintId?: string | null
+    slug?: string | null
+    token?: string | null
+  } = {},
+) {
+  const sprint = await resolveSprint(env, opts)
 
   const { results: cards } = await env.DB.prepare(
     `SELECT id, sprint_id, category, title, body, author, source, created_at
@@ -111,6 +168,7 @@ export async function loadState(env: Env, sprintId?: string | null) {
         }
       : null,
     history: await loadHistory(env),
+    seats: await loadSeats(env, sprint.id, opts.token),
     readOnly: sprint.status !== 'active',
   }
 }
@@ -132,3 +190,5 @@ export function json(data: unknown, status = 200): Response {
 export function error(message: string, status = 400): Response {
   return json({ error: message }, status)
 }
+
+export { slugFor, SEAT_COUNT }

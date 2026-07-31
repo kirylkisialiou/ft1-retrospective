@@ -1,12 +1,15 @@
 import type { Env } from '../types'
-import { error, getActiveSprint, json, loadState } from '../lib/state'
+import { error, getActiveSprint, json, loadState, slugFor } from '../lib/state'
 
 const APP_TITLE = 'FT1 - Retrospective'
 
-/** Update active sprint number (title stays branded). */
+/** Update active sprint number (slug stays stable for share links). */
 export const onRequestPatch: PagesFunction<Env> = async (context) => {
   try {
-    const body = (await context.request.json()) as { number?: number }
+    const body = (await context.request.json()) as {
+      number?: number
+      token?: string
+    }
     const active = await getActiveSprint(context.env)
 
     if (typeof body.number === 'number' && body.number > 0) {
@@ -25,7 +28,12 @@ export const onRequestPatch: PagesFunction<Env> = async (context) => {
         .run()
     }
 
-    return json(await loadState(context.env))
+    return json(
+      await loadState(context.env, {
+        sprintId: active.id,
+        token: body.token,
+      }),
+    )
   } catch (e) {
     return error(e instanceof Error ? e.message : 'Failed to update sprint', 500)
   }
@@ -40,9 +48,18 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       return error('Используй POST /api/sprint?action=close')
     }
 
+    const token = url.searchParams.get('token')
     const active = await getActiveSprint(context.env)
     const nextNumber = active.number + 1
     const nextId = crypto.randomUUID()
+    const nextSlug = slugFor(nextNumber)
+
+    const slugTaken = await context.env.DB.prepare(
+      `SELECT id FROM sprints WHERE slug = ? LIMIT 1`,
+    )
+      .bind(nextSlug)
+      .first()
+    const slug = slugTaken ? `${nextSlug}-${nextId.slice(0, 6)}` : nextSlug
 
     await context.env.DB.batch([
       context.env.DB.prepare(
@@ -51,12 +68,17 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
          WHERE id = ? AND status = 'active'`,
       ).bind(active.id),
       context.env.DB.prepare(
-        `INSERT INTO sprints (id, number, title, status)
-         VALUES (?, ?, ?, 'active')`,
-      ).bind(nextId, nextNumber, APP_TITLE),
+        `INSERT INTO sprints (id, number, slug, title, status)
+         VALUES (?, ?, ?, ?, 'active')`,
+      ).bind(nextId, nextNumber, slug, APP_TITLE),
     ])
 
-    return json(await loadState(context.env))
+    return json(
+      await loadState(context.env, {
+        sprintId: nextId,
+        token,
+      }),
+    )
   } catch (e) {
     return error(e instanceof Error ? e.message : 'Failed to close sprint', 500)
   }

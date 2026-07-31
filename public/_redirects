@@ -1,0 +1,3 @@
+# SPA fallback so /s/:slug refreshes work on Cloudflare Pages
+/api/*  /api/:splat  200
+/*      /index.html  200

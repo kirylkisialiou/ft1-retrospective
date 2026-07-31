@@ -1,5 +1,6 @@
 import type { Category, RetroState } from '../types'
 import { localApi } from './localStore'
+import { getOccupantToken } from './occupant'
 
 let preferLocal = false
 
@@ -53,12 +54,22 @@ async function withFallback<T>(
 
 export type StorageMode = 'remote' | 'local' | 'loading'
 
+function token() {
+  return getOccupantToken()
+}
+
 export const api = {
-  async getState(sprintId?: string | null) {
-    const query = sprintId ? `?sprintId=${encodeURIComponent(sprintId)}` : ''
+  async getState(ref?: string | null) {
+    const t = token()
+    const params = new URLSearchParams()
+    params.set('token', t)
+    if (ref) {
+      params.set('slug', ref)
+      params.set('sprintId', ref)
+    }
     return withFallback(
-      () => request<RetroState>(`/api/state${query}`),
-      () => localApi.getState(sprintId),
+      () => request<RetroState>(`/api/state?${params}`),
+      () => localApi.getState(ref, t),
     )
   },
 
@@ -89,23 +100,26 @@ export const api = {
   },
 
   async updateSprint(patch: { number?: number }) {
+    const t = token()
     return withFallback(
       () =>
         request<RetroState>('/api/sprint', {
           method: 'PATCH',
-          body: JSON.stringify(patch),
+          body: JSON.stringify({ ...patch, token: t }),
         }),
       () => localApi.updateSprint(patch),
     )
   },
 
   async closeSprint() {
+    const t = token()
     return withFallback(
       () =>
-        request<RetroState>('/api/sprint?action=close', {
-          method: 'POST',
-        }),
-      () => localApi.closeSprint(),
+        request<RetroState>(
+          `/api/sprint?action=close&token=${encodeURIComponent(t)}`,
+          { method: 'POST' },
+        ),
+      () => localApi.closeSprint(t),
     )
   },
 
@@ -113,6 +127,50 @@ export const api = {
     return withFallback(
       () => request<RetroState>('/api/deal', { method: 'POST' }),
       () => localApi.dealFromCampfire(),
+    )
+  },
+
+  async claimSeat(input: {
+    seatIndex: number
+    displayName: string
+    ref?: string | null
+  }) {
+    const t = token()
+    return withFallback(
+      () =>
+        request<RetroState>('/api/seats', {
+          method: 'POST',
+          body: JSON.stringify({
+            seatIndex: input.seatIndex,
+            displayName: input.displayName,
+            token: t,
+            slug: input.ref,
+            sprintId: input.ref,
+          }),
+        }),
+      () =>
+        localApi.claimSeat({
+          seatIndex: input.seatIndex,
+          displayName: input.displayName,
+          token: t,
+          ref: input.ref,
+        }),
+    )
+  },
+
+  async leaveSeat(ref?: string | null) {
+    const t = token()
+    const params = new URLSearchParams({ token: t })
+    if (ref) {
+      params.set('slug', ref)
+      params.set('sprintId', ref)
+    }
+    return withFallback(
+      () =>
+        request<RetroState>(`/api/seats?${params}`, {
+          method: 'DELETE',
+        }),
+      () => localApi.leaveSeat({ token: t, ref }),
     )
   },
 }

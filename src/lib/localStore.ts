@@ -1,21 +1,29 @@
-import { APP_NAME } from '../types'
+import { APP_NAME, SEAT_COUNT, sprintSlug } from '../types'
 import type {
   LastDeal,
   RetroCard,
   RetroState,
+  Seat,
   SprintMeta,
   SprintSummary,
 } from '../types'
 import { drawCampfireHand } from './deal'
 import { createId } from './id'
 
-const KEY = 'ft1-retrospective-v2'
+const KEY = 'ft1-retrospective-v3'
+
+interface StoredSeat {
+  seatIndex: number
+  occupantToken: string
+  displayName: string
+}
 
 interface Store {
   sprints: SprintMeta[]
   cards: Record<string, RetroCard[]>
   deals: Record<string, LastDeal | null>
-  viewingId: string | null
+  seats: Record<string, StoredSeat[]>
+  viewingRef: string | null
 }
 
 function now() {
@@ -26,6 +34,7 @@ function makeSprint(number: number): SprintMeta {
   return {
     id: createId(),
     number,
+    slug: sprintSlug(number),
     title: APP_NAME,
     status: 'active',
     createdAt: now(),
@@ -39,17 +48,39 @@ function defaultStore(): Store {
     sprints: [sprint],
     cards: { [sprint.id]: [] },
     deals: { [sprint.id]: null },
-    viewingId: null,
+    seats: { [sprint.id]: [] },
+    viewingRef: null,
+  }
+}
+
+function migrateSprint(raw: Partial<SprintMeta> & { id: string }): SprintMeta {
+  return {
+    id: raw.id,
+    number: raw.number ?? 1,
+    slug: raw.slug ?? sprintSlug(raw.number ?? 1),
+    title: raw.title ?? APP_NAME,
+    status: raw.status === 'archived' ? 'archived' : 'active',
+    createdAt: raw.createdAt ?? now(),
+    archivedAt: raw.archivedAt ?? null,
   }
 }
 
 function readStore(): Store {
   try {
-    const raw = localStorage.getItem(KEY)
+    const raw = localStorage.getItem(KEY) ?? localStorage.getItem('ft1-retrospective-v2')
     if (!raw) return defaultStore()
-    const parsed = JSON.parse(raw) as Store
+    const parsed = JSON.parse(raw) as Partial<Store> & {
+      sprints?: Array<Partial<SprintMeta> & { id: string }>
+      viewingId?: string | null
+    }
     if (!parsed.sprints?.length) return defaultStore()
-    return parsed
+    return {
+      sprints: parsed.sprints.map(migrateSprint),
+      cards: parsed.cards ?? {},
+      deals: parsed.deals ?? {},
+      seats: parsed.seats ?? {},
+      viewingRef: parsed.viewingRef ?? parsed.viewingId ?? null,
+    }
   } catch {
     return defaultStore()
   }
@@ -67,8 +98,16 @@ function activeSprint(store: Store): SprintMeta {
   store.sprints.push(created)
   store.cards[created.id] = []
   store.deals[created.id] = null
+  store.seats[created.id] = []
   writeStore(store)
   return created
+}
+
+function findSprint(store: Store, ref?: string | null): SprintMeta | null {
+  if (!ref) return null
+  return (
+    store.sprints.find((s) => s.id === ref || s.slug === ref) ?? null
+  )
 }
 
 function history(store: Store): SprintSummary[] {
@@ -80,25 +119,46 @@ function history(store: Store): SprintSummary[] {
     }))
 }
 
-function toState(store: Store, sprintId?: string | null): RetroState {
+function mapSeats(store: Store, sprintId: string, token?: string | null): Seat[] {
+  const rows = store.seats[sprintId] ?? []
+  const byIndex = new Map(rows.map((r) => [r.seatIndex, r]))
+  return Array.from({ length: SEAT_COUNT }, (_, seatIndex) => {
+    const row = byIndex.get(seatIndex)
+    return {
+      seatIndex,
+      displayName: row?.displayName ?? '',
+      occupied: Boolean(row),
+      isMine: Boolean(row && token && row.occupantToken === token),
+    }
+  })
+}
+
+function toState(
+  store: Store,
+  ref?: string | null,
+  token?: string | null,
+): RetroState {
   const active = activeSprint(store)
-  const sprint =
-    (sprintId && store.sprints.find((s) => s.id === sprintId)) || active
+  const sprint = findSprint(store, ref) ?? active
   return {
     sprint,
     cards: store.cards[sprint.id] ?? [],
     lastDeal: store.deals[sprint.id] ?? null,
     history: history(store),
+    seats: mapSeats(store, sprint.id, token),
     readOnly: sprint.status !== 'active',
   }
 }
 
 export const localApi = {
-  async getState(sprintId?: string | null): Promise<RetroState> {
+  async getState(
+    ref?: string | null,
+    token?: string | null,
+  ): Promise<RetroState> {
     const store = readStore()
-    if (sprintId !== undefined) store.viewingId = sprintId
+    if (ref !== undefined) store.viewingRef = ref
     writeStore(store)
-    return toState(store, store.viewingId)
+    return toState(store, store.viewingRef, token)
   },
 
   async addCard(input: {
@@ -119,9 +179,9 @@ export const localApi = {
       createdAt: now(),
     }
     store.cards[active.id] = [card, ...(store.cards[active.id] ?? [])]
-    store.viewingId = null
+    store.viewingRef = null
     writeStore(store)
-    return toState(store)
+    return toState(store, null, null)
   },
 
   async deleteCard(id: string): Promise<RetroState> {
@@ -130,7 +190,7 @@ export const localApi = {
     store.cards[active.id] = (store.cards[active.id] ?? []).filter(
       (c) => c.id !== id,
     )
-    store.viewingId = null
+    store.viewingRef = null
     writeStore(store)
     return toState(store)
   },
@@ -146,21 +206,25 @@ export const localApi = {
       active.number = number
     }
     writeStore(store)
-    return toState(store)
+    return toState(store, active.id)
   },
 
-  async closeSprint(): Promise<RetroState> {
+  async closeSprint(token?: string | null): Promise<RetroState> {
     const store = readStore()
     const active = activeSprint(store)
     active.status = 'archived'
     active.archivedAt = now()
-    const next = makeSprint(active.number + 1)
+    let next = makeSprint(active.number + 1)
+    if (store.sprints.some((s) => s.slug === next.slug)) {
+      next = { ...next, slug: `${next.slug}-${next.id.slice(0, 6)}` }
+    }
     store.sprints.push(next)
     store.cards[next.id] = []
     store.deals[next.id] = null
-    store.viewingId = null
+    store.seats[next.id] = []
+    store.viewingRef = null
     writeStore(store)
-    return toState(store)
+    return toState(store, next.id, token)
   },
 
   async dealFromCampfire(): Promise<RetroState> {
@@ -178,8 +242,61 @@ export const localApi = {
       cardIds: cards.map((c) => c.id),
       createdAt: now(),
     }
-    store.viewingId = null
+    store.viewingRef = null
     writeStore(store)
-    return toState(store)
+    return toState(store, active.id)
+  },
+
+  async claimSeat(input: {
+    seatIndex: number
+    displayName: string
+    token: string
+    ref?: string | null
+  }): Promise<RetroState> {
+    const store = readStore()
+    const sprint = findSprint(store, input.ref) ?? activeSprint(store)
+    if (sprint.status !== 'active') {
+      throw new Error('В архиве места уже заняты историей — только просмотр')
+    }
+    if (input.seatIndex < 0 || input.seatIndex >= SEAT_COUNT) {
+      throw new Error('За столом только 8 мест')
+    }
+    const name = input.displayName.trim()
+    if (!name) throw new Error('Как тебя зовут у костра?')
+
+    let seats = (store.seats[sprint.id] ?? []).filter(
+      (s) => s.occupantToken !== input.token,
+    )
+    const occupied = seats.find((s) => s.seatIndex === input.seatIndex)
+    if (occupied && occupied.occupantToken !== input.token) {
+      throw new Error('Это место уже занято')
+    }
+    seats = seats.filter((s) => s.seatIndex !== input.seatIndex)
+    seats.push({
+      seatIndex: input.seatIndex,
+      occupantToken: input.token,
+      displayName: name,
+    })
+    store.seats[sprint.id] = seats
+    store.viewingRef = sprint.slug
+    writeStore(store)
+    return toState(store, sprint.slug, input.token)
+  },
+
+  async leaveSeat(input: {
+    token: string
+    ref?: string | null
+  }): Promise<RetroState> {
+    const store = readStore()
+    const sprint = findSprint(store, input.ref) ?? activeSprint(store)
+    if (sprint.status !== 'active') {
+      throw new Error('В архиве нельзя вставать — это уже история')
+    }
+    store.seats[sprint.id] = (store.seats[sprint.id] ?? []).filter(
+      (s) => s.occupantToken !== input.token,
+    )
+    store.viewingRef = sprint.slug
+    writeStore(store)
+    return toState(store, sprint.slug, input.token)
   },
 }
