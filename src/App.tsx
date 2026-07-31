@@ -6,7 +6,8 @@ import {
   type FormEvent,
 } from 'react'
 import './App.css'
-import { MIN_HUMAN_CARDS } from './data/campfireDeck'
+import { CampScene } from './components/CampScene'
+import { canDeal, COLUMN_TARGET } from './lib/deal'
 import { api, type StorageMode } from './lib/api'
 import {
   APP_NAME,
@@ -19,13 +20,13 @@ import {
 function Stars() {
   const stars = useMemo(
     () =>
-      Array.from({ length: 40 }, (_, i) => ({
+      Array.from({ length: 70 }, (_, i) => ({
         id: i,
-        left: `${(i * 37) % 100}%`,
-        top: `${(i * 53) % 70}%`,
-        delay: `${(i % 10) * 0.35}s`,
-        dur: `${2.5 + (i % 5) * 0.6}s`,
-        bright: i % 7 === 0,
+        left: `${(i * 41 + 7) % 100}%`,
+        top: `${(i * 29) % 72}%`,
+        delay: `${(i % 12) * 0.28}s`,
+        dur: `${2.2 + (i % 6) * 0.55}s`,
+        bright: i % 5 === 0,
       })),
     [],
   )
@@ -46,6 +47,7 @@ function Stars() {
           }
         />
       ))}
+      <div className="moon" />
     </div>
   )
 }
@@ -53,7 +55,6 @@ function Stars() {
 function formatDealCopy(state: RetroState): string {
   const lines = [
     `${APP_NAME} · Sprint #${state.sprint.number}`,
-    state.lastDeal?.summary ?? '',
     '',
     ...CATEGORIES.flatMap((cat) => {
       const cards = state.cards.filter((c) => c.category === cat.id)
@@ -118,8 +119,13 @@ export default function App() {
   }, [mode, viewingId])
 
   const readOnly = state?.readOnly ?? false
-  const humanCount = state?.cards.filter((c) => c.source === 'human').length ?? 0
-  const needsDeal = !readOnly && humanCount < MIN_HUMAN_CARDS
+  const dealAvailable = !readOnly && canDeal(state?.cards ?? [])
+  const thinColumns = CATEGORIES.filter((cat) => {
+    const human = (state?.cards ?? []).filter(
+      (c) => c.source === 'human' && c.category === cat.id,
+    ).length
+    return human < COLUMN_TARGET
+  }).length
   const archived = state?.history.filter((s) => s.status === 'archived') ?? []
 
   async function onAdd(e: FormEvent) {
@@ -141,7 +147,7 @@ export default function App() {
   }
 
   async function onDeal() {
-    if (readOnly) return
+    if (readOnly || !dealAvailable) return
     setBusy(true)
     setError(null)
     try {
@@ -235,11 +241,12 @@ export default function App() {
         <div className="silhouette" />
       </div>
       <div className="campfire-glow" aria-hidden="true" />
+      <div className="side-fire-wash" aria-hidden="true" />
 
       <header className="hero">
         <div className="badge">Sprint #{state?.sprint.number ?? '…'}</div>
         <h1>{APP_NAME}</h1>
-        <p className="lede">Карты у костра: плюсы, минусы, спасибо, улучшить.</p>
+        <p className="lede">Вечер у костра после спринта.</p>
         <div className="sprint-row">
           {!readOnly ? (
             <label>
@@ -278,6 +285,8 @@ export default function App() {
 
       <div className="layout">
         <aside className="sidebar">
+          <CampScene />
+
           {!readOnly ? (
             <section className="panel">
               <h2>Новая карта</h2>
@@ -392,23 +401,37 @@ export default function App() {
               <div className="crew">
                 <strong>Sprint #{state?.sprint.number ?? '…'}</strong>
               </div>
-              {!readOnly ? (
+              <div className="table-actions">
+                {!readOnly ? (
+                  <button
+                    type="button"
+                    className={`deal-btn${busy ? ' busy' : ''}`}
+                    onClick={() => void onDeal()}
+                    disabled={busy || !dealAvailable}
+                    title={
+                      dealAvailable
+                        ? 'Доложить темы в тонкие колонки (свои карты остаются)'
+                        : 'Во всех колонках уже хватает своих карт'
+                    }
+                  >
+                    Раздать
+                  </button>
+                ) : null}
                 <button
                   type="button"
-                  className={`deal-btn${busy ? ' busy' : ''}`}
-                  onClick={() => void onDeal()}
-                  disabled={busy}
-                  title="Раздать темы из колоды"
+                  className="btn btn-ghost"
+                  onClick={() => void onCopy()}
+                  disabled={!state}
                 >
-                  Раздать
+                  {copied ? 'Скопировано' : 'Скопировать'}
                 </button>
-              ) : null}
+              </div>
             </div>
 
-            {needsDeal ? (
+            {!readOnly && dealAvailable ? (
               <div className="low-cards">
-                Мало карт ({humanCount}/{MIN_HUMAN_CARDS}). Добавьте свои или
-                нажмите «Раздать».
+                Тонких колонок: {thinColumns}. «Раздать» доложит до{' '}
+                {COLUMN_TARGET} тем в каждую (старые карты колоды заменятся).
               </div>
             ) : null}
 
@@ -460,24 +483,19 @@ export default function App() {
                 )
               })}
             </div>
-
-            <div className="footer-bar">
-              <div>
-                <div className="label">последняя раздача</div>
-                <p>{state?.lastDeal?.summary ?? 'Ещё не было'}</p>
-              </div>
-              <button
-                type="button"
-                className="btn btn-ghost"
-                onClick={() => void onCopy()}
-                disabled={!state}
-              >
-                {copied ? 'Скопировано' : 'Скопировать'}
-              </button>
-            </div>
           </section>
         </main>
       </div>
+
+      <footer className="retro-rules">
+        <h2>Правила у костра</h2>
+        <ul>
+          <li>Безопасное место — можно говорить прямо.</li>
+          <li>Без обвинений: смотрим на процесс, не на людей.</li>
+          <li>Один говорит — остальные слушают.</li>
+          <li>Выходим с действиями, а не только с дымом.</li>
+        </ul>
+      </footer>
 
       {error ? <p className="status error">{error}</p> : null}
       {!state && !error ? <p className="status">Загрузка…</p> : null}

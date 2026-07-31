@@ -109,11 +109,20 @@ export const CAMPFIRE_DECK: CampPrompt[] = [
   },
 ]
 
+const CATEGORIES: Category[] = ['plus', 'minus', 'thanks', 'improve']
+export const COLUMN_TARGET = 2
+
 const LABELS: Record<Category, string> = {
   plus: 'плюс',
   minus: 'минус',
   thanks: 'спасибо',
   improve: 'улучшить',
+}
+
+export interface ExistingCard {
+  category: string
+  title: string
+  source: string
 }
 
 function shuffle<T>(items: T[]): T[] {
@@ -125,28 +134,44 @@ function shuffle<T>(items: T[]): T[] {
   return copy
 }
 
-export function drawCampfireHand(existingTitles: string[]) {
-  const used = new Set(existingTitles)
-  const byCategory = new Map<Category, CampPrompt[]>()
+/** См. src/lib/deal.ts — замена колоды + добор до COLUMN_TARGET по human-картам. */
+export function drawCampfireHand(existing: ExistingCard[]) {
+  const human = existing.filter((c) => c.source === 'human')
+  const used = new Set(human.map((c) => c.title))
+  const pools = new Map<Category, CampPrompt[]>()
 
   for (const prompt of shuffle(CAMPFIRE_DECK)) {
     if (used.has(prompt.title)) continue
-    const list = byCategory.get(prompt.category) ?? []
+    const list = pools.get(prompt.category) ?? []
     list.push(prompt)
-    byCategory.set(prompt.category, list)
+    pools.set(prompt.category, list)
   }
 
-  const categories: Category[] = ['minus', 'plus', 'thanks', 'improve']
-  const cards = categories.map((category) => {
-    const pool = byCategory.get(category) ?? []
-    const prompt =
-      pool[0] ??
-      shuffle(CAMPFIRE_DECK.filter((p) => p.category === category))[0]
-    return prompt
-  })
+  const cards: CampPrompt[] = []
 
-  const labels = cards.map((c) => LABELS[c.category]).join(', ')
-  const summary = `У костра раздали ${cards.length}: ${labels}. Огонь слушает, Jira наблюдает.`
+  for (const category of CATEGORIES) {
+    const humanInCol = human.filter((c) => c.category === category).length
+    const need = Math.max(0, COLUMN_TARGET - humanInCol)
+    if (need === 0) continue
+
+    const pool = pools.get(category) ?? []
+    const fallback = shuffle(
+      CAMPFIRE_DECK.filter((p) => p.category === category),
+    )
+    const source = pool.length ? pool : fallback
+
+    for (let i = 0; i < need; i += 1) {
+      const prompt = source[i]
+      if (!prompt) break
+      cards.push(prompt)
+    }
+  }
+
+  const labels = [...new Set(cards.map((c) => LABELS[c.category]))].join(', ')
+  const summary =
+    cards.length === 0
+      ? 'Во всех колонках уже достаточно своих карт — колода отдыхает.'
+      : `У костра раздали ${cards.length}: ${labels}.`
 
   return { cards, summary }
 }

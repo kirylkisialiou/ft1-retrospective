@@ -43,8 +43,9 @@ body {
   min-width: 320px;
   overflow-x: hidden;
   background:
-    radial-gradient(ellipse 120% 60% at 50% 100%, rgba(232, 145, 58, 0.18), transparent 55%),
-    linear-gradient(180deg, var(--sky-top) 0%, var(--sky-mid) 55%, var(--sky-horizon) 100%);
+    radial-gradient(ellipse 90% 50% at 18% 85%, rgba(255, 140, 50, 0.16), transparent 50%),
+    radial-gradient(ellipse 120% 60% at 50% 100%, rgba(232, 145, 58, 0.2), transparent 55%),
+    linear-gradient(180deg, #040910 0%, var(--sky-mid) 52%, var(--sky-horizon) 100%);
 }
 
 button,

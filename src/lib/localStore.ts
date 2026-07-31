@@ -167,8 +167,12 @@ export const localApi = {
     const store = readStore()
     const active = activeSprint(store)
     const existing = store.cards[active.id] ?? []
+    const humanOnly = existing.filter((c) => c.source !== 'camp')
     const { cards, summary } = drawCampfireHand(existing)
-    store.cards[active.id] = [...cards, ...existing]
+    if (cards.length === 0) {
+      throw new Error(summary)
+    }
+    store.cards[active.id] = [...cards, ...humanOnly]
     store.deals[active.id] = {
       summary,
       cardIds: cards.map((c) => c.id),

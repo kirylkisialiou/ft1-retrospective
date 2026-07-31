@@ -6,9 +6,28 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   try {
     const active = await getActiveSprint(context.env)
     const state = await loadState(context.env)
-    const { cards, summary } = drawCampfireHand(state.cards.map((c) => c.title))
-    const ids: string[] = []
 
+    // Старые карты колоды убираем — повторный клик не копит спам.
+    await context.env.DB.prepare(
+      `DELETE FROM cards WHERE sprint_id = ? AND source = 'camp'`,
+    )
+      .bind(active.id)
+      .run()
+
+    const remaining = state.cards.filter((c) => c.source !== 'camp')
+    const { cards, summary } = drawCampfireHand(
+      remaining.map((c) => ({
+        category: c.category,
+        title: c.title,
+        source: c.source,
+      })),
+    )
+
+    if (cards.length === 0) {
+      return error(summary, 409)
+    }
+
+    const ids: string[] = []
     for (const card of cards) {
       const id = crypto.randomUUID()
       ids.push(id)
