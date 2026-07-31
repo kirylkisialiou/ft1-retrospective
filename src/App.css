@@ -946,17 +946,12 @@
   position: relative;
   z-index: 2;
   margin: 0.75rem 0.15rem 0;
-  padding: 0.85rem 1rem 0.95rem;
-  border-radius: 0.45rem 0.9rem 0.55rem 0.8rem / 0.75rem 0.4rem 0.85rem 0.5rem;
-  border: 1px solid rgba(74, 46, 24, 0.45);
-  background:
-    radial-gradient(ellipse 70% 50% at 10% 0%, rgba(120, 80, 40, 0.18), transparent 50%),
-    linear-gradient(165deg, rgba(236, 220, 180, 0.92), rgba(210, 185, 140, 0.9));
-  box-shadow:
-    0 8px 18px rgba(0, 0, 0, 0.28),
-    inset 0 1px 0 rgba(255, 248, 230, 0.35);
+  padding: 0.65rem 0.5rem 0.35rem;
+  border: none;
+  background: transparent;
+  box-shadow: none;
   text-align: center;
-  color: var(--ink);
+  color: var(--cream);
 }
 
 .retro-rules h2 {
@@ -964,7 +959,8 @@
   font-family: Rye, Georgia, serif;
   font-size: 1.2rem;
   font-weight: 400;
-  color: #7a3f18;
+  color: var(--ember-hot);
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.45);
 }
 
 .retro-rules ul {
@@ -978,8 +974,9 @@
 .retro-rules li {
   font-size: 1.02rem;
   line-height: 1.35;
-  color: rgba(36, 22, 12, 0.88);
+  color: rgba(242, 230, 208, 0.88);
   font-weight: 600;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.4);
 }
 
 .status {
