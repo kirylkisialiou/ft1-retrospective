@@ -2,8 +2,14 @@ name = "ft1-retrospective"
 compatibility_date = "2025-07-01"
 pages_build_output_dir = "dist"
 
-[[d1_databases]]
-binding = "DB"
-database_name = "ft1-retro"
-database_id = "local-ft1-retro"
-preview_database_id = "local-ft1-retro"
+# D1 binding for local `wrangler pages dev` / CLI deploy.
+# For Git-connected Cloudflare Pages, also set the same binding in the dashboard:
+#   Settings → Bindings → D1 → variable name `DB` → database `ft1-retro`
+#
+# After: npx wrangler login && npx wrangler d1 create ft1-retro
+# paste the real database_id UUID below (never use a placeholder like "local-ft1-retro").
+#
+# [[d1_databases]]
+# binding = "DB"
+# database_name = "ft1-retro"
+# database_id = "YOUR-D1-UUID-HERE"

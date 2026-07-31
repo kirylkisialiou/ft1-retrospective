@@ -26,18 +26,7 @@ http://localhost:5173 — данные в браузере.
 
 ## Cloudflare Pages + GitHub (autodeploy)
 
-1. Создайте D1 и пропишите `database_id` в `wrangler.toml`:
-
-```bash
-npx wrangler login
-npx wrangler d1 create ft1-retro
-# вставьте database_id в wrangler.toml
-npm run db:remote
-```
-
-2. В [Cloudflare Dashboard](https://dash.cloudflare.com/) → **Workers & Pages** → **Create** → **Pages** → **Connect to Git** → выберите этот репозиторий.
-
-Настройки сборки:
+### Build settings
 
 | Setting | Value |
 |--------|--------|
@@ -46,11 +35,43 @@ npm run db:remote
 | Build output directory | `dist` |
 | Root directory | `/` |
 
-3. **Settings → Bindings → D1 database**: binding name `DB` → database `ft1-retro`.
+### D1 database (required for shared persistence)
 
-4. После первого деплоя при необходимости снова накатите схему: `npm run db:remote`.
+**Do not put a fake `database_id` like `local-ft1-retro` in `wrangler.toml`** — Pages deploy fails with `Error 8000022`.
 
-Папка `functions/` становится Pages Functions (`/api/state`, `/api/cards`, `/api/deal`, `/api/sprint`).
+1. Login and create the database (once):
+
+```bash
+cd /Users/kirylkisialiou/ft1-retro-jackpot
+npx wrangler login
+npx wrangler d1 create ft1-retro
+```
+
+2. Copy the printed UUID into `wrangler.toml`:
+
+```toml
+[[d1_databases]]
+binding = "DB"
+database_name = "ft1-retro"
+database_id = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+```
+
+3. Apply schema:
+
+```bash
+npx wrangler d1 execute ft1-retro --remote --file=./schema.sql
+```
+
+4. In Cloudflare Dashboard → your Pages project → **Settings → Bindings**:
+   - Type: **D1 database**
+   - Variable name: **`DB`** (must match the code)
+   - Database: **`ft1-retro`** (same DB as above)
+
+5. Commit/push the real `database_id` (or rely on the dashboard binding alone — both should point at the same DB).
+
+Without a D1 binding the site still loads; the app falls back to `localStorage` per browser.
+
+Папка `functions/` → Pages Functions (`/api/state`, `/api/cards`, `/api/deal`, `/api/sprint`).
 
 ## Скрипты
 
