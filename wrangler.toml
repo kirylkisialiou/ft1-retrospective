@@ -1,0 +1,9 @@
+name = "ft1-retrospective"
+compatibility_date = "2025-07-01"
+pages_build_output_dir = "dist"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "ft1-retro"
+database_id = "local-ft1-retro"
+preview_database_id = "local-ft1-retro"

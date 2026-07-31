@@ -1,0 +1,64 @@
+:root {
+  --sky-top: #050b14;
+  --sky-mid: #0c1a2e;
+  --sky-horizon: #1a2a28;
+  --ember: #e8913a;
+  --ember-hot: #ffb45a;
+  --ember-deep: #c45c26;
+  --felt: #1a4a36;
+  --felt-deep: #123528;
+  --wood: #4a2e18;
+  --wood-dark: #2c1a0e;
+  --parchment: #f3e6c8;
+  --parchment-dark: #e2cfab;
+  --ink: #24160c;
+  --cream: #f2e6d0;
+  --smoke: rgba(242, 230, 208, 0.55);
+  --lantern: rgba(232, 145, 58, 0.35);
+  --danger: #8b3a2a;
+
+  font-family: 'Source Sans 3', system-ui, sans-serif;
+  font-size: 18px;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  color: var(--cream);
+  background: var(--sky-top);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  overflow-x: hidden;
+  background:
+    radial-gradient(ellipse 120% 60% at 50% 100%, rgba(232, 145, 58, 0.18), transparent 55%),
+    linear-gradient(180deg, var(--sky-top) 0%, var(--sky-mid) 55%, var(--sky-horizon) 100%);
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+::selection {
+  background: rgba(232, 145, 58, 0.45);
+  color: #fff;
+}

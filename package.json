@@ -1,0 +1,30 @@
+{
+  "name": "ft1-retrospective",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "lint": "oxlint",
+    "preview": "vite preview",
+    "db:local": "wrangler d1 execute ft1-retro --local --file=./schema.sql",
+    "db:remote": "wrangler d1 execute ft1-retro --remote --file=./schema.sql",
+    "deploy": "npm run build && wrangler pages deploy dist --project-name=ft1-retrospective"
+  },
+  "dependencies": {
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260731.1",
+    "@types/node": "^24.13.3",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.4",
+    "oxlint": "^1.75.0",
+    "typescript": "~6.0.2",
+    "vite": "^8.2.0",
+    "wrangler": "^4.117.0"
+  }
+}
