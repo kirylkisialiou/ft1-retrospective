@@ -86,11 +86,22 @@ Without a D1 binding the site still loads; the app falls back to `localStorage` 
 
 Папка `functions/` → Pages Functions (`/api/state`, `/api/cards`, `/api/deal`, `/api/sprint`).
 
+### Deploy failed uploading assets (`Failed to publish assets` / empty `Error: {}`)
+
+Сборка `dist` у нас ~260KB — это не размер файлов. Обычно это **сбой Cloudflare API** на `pages/assets/upload` (522/502, differential upload). Сейчас status часто показывает degraded performance.
+
+Что делать:
+1. В Dashboard → Pages → **Retry deployment** (часто проходит со 2–3 раза).
+2. Или локально, когда API живой: `npm run deploy:nocache` (`--skip-caching` обходит баг differential upload).
+3. Не катить destructive `schema.sql` ради этого — к upload assets это не относится.
+
 ## Скрипты
 
 | Команда | Что делает |
 |--------|------------|
 | `npm run dev` | Vite + localStorage |
 | `npm run build` | Typecheck + `dist` |
-| `npm run db:remote` | Схема в D1 |
-| `npm run deploy` | Ручной deploy через wrangler |
+| `npm run db:remote` | Схема в D1 (destructive) |
+| `npm run db:migrate` | Безопасная миграция seats/slug |
+| `npm run deploy` | Ручной Pages deploy |
+| `npm run deploy:nocache` | Deploy без asset cache (если upload флапает) |

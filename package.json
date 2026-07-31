@@ -11,7 +11,8 @@
     "db:local": "wrangler d1 execute ft1-retro --local --file=./schema.sql",
     "db:remote": "wrangler d1 execute ft1-retro --remote --file=./schema.sql",
     "db:migrate": "wrangler d1 execute ft1-retro --remote --file=./migrations/0002_seats_slug.sql",
-    "deploy": "npm run build && wrangler pages deploy dist --project-name=ft1-retrospective"
+    "deploy": "npm run build && wrangler pages deploy dist --project-name=ft1-retrospective --commit-dirty=true",
+    "deploy:nocache": "npm run build && wrangler pages deploy dist --project-name=ft1-retrospective --commit-dirty=true --skip-caching"
   },
   "dependencies": {
     "react": "^19.2.8",
