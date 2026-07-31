@@ -157,19 +157,36 @@ export async function loadState(
     .bind(sprint.id)
     .first<DbDeal>()
 
+  const seats = await loadSeats(env, sprint.id, opts.token)
+  const mappedCards = (cards ?? []).map(mapCard)
+  const lastDeal = last
+    ? {
+        summary: last.summary,
+        cardIds: JSON.parse(last.card_ids || '[]') as string[],
+        createdAt: last.created_at,
+      }
+    : null
+
+  const revisionParts = [
+    sprint.id,
+    sprint.status,
+    String(sprint.number),
+    sprint.archived_at ?? '',
+    lastDeal?.createdAt ?? '',
+    ...mappedCards.map((c) => `${c.id}:${c.createdAt}`),
+    ...seats.map(
+      (s) => `${s.seatIndex}:${s.occupied ? s.displayName : ''}`,
+    ),
+  ]
+
   return {
     sprint: mapSprint(sprint),
-    cards: (cards ?? []).map(mapCard),
-    lastDeal: last
-      ? {
-          summary: last.summary,
-          cardIds: JSON.parse(last.card_ids || '[]') as string[],
-          createdAt: last.created_at,
-        }
-      : null,
+    cards: mappedCards,
+    lastDeal,
     history: await loadHistory(env),
-    seats: await loadSeats(env, sprint.id, opts.token),
+    seats,
     readOnly: sprint.status !== 'active',
+    revision: revisionParts.join('|'),
   }
 }
 

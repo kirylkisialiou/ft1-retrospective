@@ -1,6 +1,8 @@
 import {
+  useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type CSSProperties,
   type FormEvent,
@@ -20,6 +22,12 @@ import {
   roomShareUrl,
   syncRoomUrl,
 } from './lib/route'
+import {
+  nextBackoff,
+  POLL_ACTIVE_MS,
+  POLL_ARCHIVED_MS,
+  stateFingerprint,
+} from './lib/sync'
 import {
   APP_NAME,
   CATEGORIES,
@@ -91,6 +99,7 @@ export default function App() {
   const [busy, setBusy] = useState(false)
   const [copied, setCopied] = useState(false)
   const [linkCopied, setLinkCopied] = useState(false)
+  const [liveHint, setLiveHint] = useState('')
   const [roomRef, setRoomRef] = useState<string | null>(() => parseRoomSlug())
   const [form, setForm] = useState({
     category: 'plus' as Category,
@@ -99,27 +108,72 @@ export default function App() {
     author: getSavedDisplayName(),
   })
 
-  async function load(ref?: string | null, syncUrl = true) {
-    const result = await api.getState(ref)
-    setState(result.data)
-    setMode(result.mode)
-    setRoomRef(result.data.sprint.slug)
-    if (syncUrl) syncRoomUrl(result.data.sprint.slug)
-    const mine = result.data.seats.find((s) => s.isMine)
-    if (mine) {
-      setForm((f) => ({ ...f, author: mine.displayName }))
+  const fingerprintRef = useRef('')
+  const roomRefStable = useRef(roomRef)
+  roomRefStable.current = roomRef
+  const readOnlyRef = useRef(false)
+
+  const applyBoard = useCallback(
+    (
+      result: { data: RetroState; mode: 'remote' | 'local' },
+      opts?: { syncUrl?: boolean; force?: boolean },
+    ) => {
+      const fp = stateFingerprint(result.data)
+      if (!opts?.force && fp === fingerprintRef.current) {
+        setMode(result.mode)
+        return
+      }
+      fingerprintRef.current = fp
+      setState(result.data)
+      setMode(result.mode)
+      setRoomRef(result.data.sprint.slug)
+      readOnlyRef.current = result.data.readOnly
+      if (opts?.syncUrl !== false) syncRoomUrl(result.data.sprint.slug)
+
+      const mine = result.data.seats.find((s) => s.isMine)
+      if (mine) {
+        setForm((f) =>
+          f.author === mine.displayName ? f : { ...f, author: mine.displayName },
+        )
+      }
+    },
+    [],
+  )
+
+  const load = useCallback(
+    async (ref?: string | null, syncUrl = true) => {
+      const result = await api.getState(ref)
+      applyBoard(result, { syncUrl, force: true })
+      return result
+    },
+    [applyBoard],
+  )
+
+  const refreshSoft = useCallback(async () => {
+    const ref = roomRefStable.current
+    try {
+      const result = await api.getState(ref, { soft: true })
+      applyBoard(result, { syncUrl: false })
+      setLiveHint(result.mode === 'remote' ? 'live' : 'local')
+      setError(null)
+      return true
+    } catch {
+      setLiveHint('reconnect…')
+      return false
     }
-  }
+  }, [applyBoard])
 
   useEffect(() => {
     let cancelled = false
     ;(async () => {
       try {
         await load(parseRoomSlug())
+        if (!cancelled) setLiveHint('live')
       } catch (e) {
         if (!cancelled) {
           setError(e instanceof Error ? e.message : 'Не удалось загрузить')
           setMode('local')
+          setLiveHint('local')
         }
       }
     })()
@@ -134,17 +188,56 @@ export default function App() {
       cancelled = true
       window.removeEventListener('popstate', onPop)
     }
-  }, [])
+  }, [load])
 
+  // Near-live sync: poll while tab visible; pause when hidden; backoff on errors.
   useEffect(() => {
-    if (mode !== 'remote' || !roomRef) return
-    const id = window.setInterval(() => {
-      void load(roomRef, false).catch(() => undefined)
-    }, 8000)
-    return () => window.clearInterval(id)
-  }, [mode, roomRef])
+    let timer: number | null = null
+    let stopped = false
+    let delay = POLL_ACTIVE_MS
+
+    async function tick() {
+      if (stopped) return
+      if (document.hidden) {
+        timer = window.setTimeout(tick, delay)
+        return
+      }
+      const ok = await refreshSoft()
+      delay = ok
+        ? readOnlyRef.current
+          ? POLL_ARCHIVED_MS
+          : POLL_ACTIVE_MS
+        : nextBackoff(delay)
+      if (!stopped) timer = window.setTimeout(tick, delay)
+    }
+
+    function onVisibility() {
+      if (!document.hidden) {
+        delay = POLL_ACTIVE_MS
+        void refreshSoft()
+      }
+    }
+
+    window.addEventListener('visibilitychange', onVisibility)
+    timer = window.setTimeout(tick, POLL_ACTIVE_MS)
+    return () => {
+      stopped = true
+      if (timer) window.clearTimeout(timer)
+      window.removeEventListener('visibilitychange', onVisibility)
+    }
+  }, [refreshSoft])
+
+  // Same-browser tabs share local mutations instantly.
+  useEffect(() => {
+    const bc = new BroadcastChannel('ft1-retrospective-sync')
+    bc.onmessage = (ev: MessageEvent<{ type?: string; ref?: string }>) => {
+      if (ev.data?.type === 'mutate') void refreshSoft()
+    }
+    return () => bc.close()
+  }, [refreshSoft])
 
   const readOnly = state?.readOnly ?? false
+  readOnlyRef.current = readOnly
   const mySeat = state?.seats.find((s) => s.isMine)
   const dealAvailable = !readOnly && canDeal(state?.cards ?? [])
   const thinColumns = CATEGORIES.filter((cat) => {
@@ -155,11 +248,23 @@ export default function App() {
   }).length
   const archived = state?.history.filter((s) => s.status === 'archived') ?? []
 
-  async function applyState(result: { data: RetroState; mode: 'remote' | 'local' }) {
-    setState(result.data)
-    setMode(result.mode)
-    setRoomRef(result.data.sprint.slug)
-    syncRoomUrl(result.data.sprint.slug)
+  async function applyState(result: {
+    data: RetroState
+    mode: 'remote' | 'local'
+  }) {
+    applyBoard(result, { syncUrl: true, force: true })
+    setLiveHint(result.mode === 'remote' ? 'live' : 'local')
+    try {
+      const bc = new BroadcastChannel('ft1-retrospective-sync')
+      bc.postMessage({ type: 'mutate', ref: result.data.sprint.slug })
+      bc.close()
+    } catch {
+      /* ignore */
+    }
+    if (result.mode === 'remote') {
+      api.markRemoteOk()
+      void refreshSoft()
+    }
   }
 
   async function onAdd(e: FormEvent) {
@@ -347,8 +452,8 @@ export default function App() {
             {mode === 'loading'
               ? '…'
               : mode === 'remote'
-                ? 'Cloudflare D1'
-                : 'localStorage'}
+                ? `D1 · ${liveHint || 'live'}`
+                : `local · ${liveHint || 'sync'}`}
           </span>
         </div>
         {state ? (

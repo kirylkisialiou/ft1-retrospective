@@ -140,13 +140,25 @@ function toState(
 ): RetroState {
   const active = activeSprint(store)
   const sprint = findSprint(store, ref) ?? active
+  const cards = store.cards[sprint.id] ?? []
+  const seats = mapSeats(store, sprint.id, token)
+  const lastDeal = store.deals[sprint.id] ?? null
+  const revision = [
+    sprint.id,
+    sprint.status,
+    String(sprint.number),
+    lastDeal?.createdAt ?? '',
+    ...cards.map((c) => `${c.id}:${c.createdAt}`),
+    ...seats.map((s) => `${s.seatIndex}:${s.occupied ? s.displayName : ''}`),
+  ].join('|')
   return {
     sprint,
-    cards: store.cards[sprint.id] ?? [],
-    lastDeal: store.deals[sprint.id] ?? null,
+    cards,
+    lastDeal,
     history: history(store),
-    seats: mapSeats(store, sprint.id, token),
+    seats,
     readOnly: sprint.status !== 'active',
+    revision,
   }
 }
 

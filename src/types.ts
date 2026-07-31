@@ -58,6 +58,8 @@ export interface RetroState {
   history: SprintSummary[]
   seats: Seat[]
   readOnly: boolean
+  /** Server/client revision for cheap poll diffs (ISO or composite). */
+  revision: string
 }
 
 export const APP_NAME = 'FT1 - Retrospective'
