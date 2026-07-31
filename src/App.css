@@ -57,13 +57,17 @@
   width: clamp(7rem, 14vw, 11rem);
   height: clamp(7rem, 14vw, 11rem);
   border-radius: 50%;
-  background:
-    url('/moon.png') center / contain no-repeat;
+  overflow: hidden;
+  background-color: transparent;
+  background-image: url('/moon.png');
+  background-position: center;
+  background-size: cover;
+  background-repeat: no-repeat;
+  /* Soft halo only in CSS — not baked into the PNG */
   box-shadow:
-    0 0 36px 14px rgba(245, 220, 170, 0.2),
-    0 0 90px 36px rgba(232, 190, 120, 0.1);
-  opacity: 0.92;
-  filter: drop-shadow(0 0 18px rgba(245, 220, 170, 0.35));
+    0 0 28px 8px rgba(245, 220, 170, 0.28),
+    0 0 72px 24px rgba(232, 190, 120, 0.14);
+  opacity: 0.95;
 }
 
 @keyframes twinkle {
